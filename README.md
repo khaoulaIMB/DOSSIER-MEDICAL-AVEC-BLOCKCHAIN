@@ -1,9 +1,9 @@
 # DOSSIER-MEDICAL-AVEC-BLOCKCHAIN
 Système de Gestion des Dossiers Médicaux sur la Blockchain
-Description du Projet
+### Description du Projet
 Ce projet est une application décentralisée (DApp) permettant la gestion sécurisée des dossiers médicaux sur une blockchain Ethereum. Il garantit la transparence, la sécurité et la confidentialité des informations grâce à l'utilisation des smart contracts et du stockage décentralisé via IPFS. Les patients peuvent stocker, gérer et contrôler l'accès à leurs dossiers médicaux, tandis que les médecins accèdent uniquement aux dossiers autorisés.
 
-Fonctionnalités Principales
+### Fonctionnalités Principales
 Authentification des Utilisateurs
 
 Enregistrement et connexion pour les patients et les médecins.
@@ -26,7 +26,8 @@ Interface Utilisateur Conviviale
 Application graphique développée avec Tkinter pour faciliter l'interaction des utilisateurs.
 Différents onglets pour l'authentification, la gestion des patients, l'accès aux informations et les logs d'audit.
 Architecture du Système
-L'architecture repose sur les éléments suivants :
+
+### L'architecture repose sur les éléments suivants :
 
 Ethereum Blockchain : Enregistrement des hachages des fichiers et gestion des transactions.
 Smart Contracts : Contrats Solidity pour gérer les permissions, les utilisateurs et les logs d'audit.
