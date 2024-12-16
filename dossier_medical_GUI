@@ -1,0 +1,405 @@
+import tkinter as tk
+from tkinter import messagebox, ttk, filedialog
+from web3 import Web3
+import json
+import os
+import requests
+from dotenv import load_dotenv
+from Crypto.Cipher import AES
+import base64
+
+# Charger les variables d'environnement depuis le fichier .env
+load_dotenv()
+p = os.getenv('PINATA_API_KEY')
+print(p)
+p1 = os.getenv('PINATA_SECRET_API_KEY')
+print(p1)
+
+# Fonction pour uploader un fichier sur Pinata
+def upload_to_pinata(file_path):
+    url = "https://api.pinata.cloud/pinning/pinFileToIPFS"
+    headers = {
+        "pinata_api_key": os.getenv('PINATA_API_KEY'),
+        "pinata_secret_api_key": os.getenv('PINATA_SECRET_API_KEY')
+    }
+    with open(file_path, 'rb') as file:
+        files = {
+            'file': (os.path.basename(file_path), file)
+        }
+        data = {
+            'pinataMetadata': json.dumps({
+                'name': os.path.basename(file_path),
+                'keyvalues': {
+                    'project': 'MedicalRecordsapp'
+                }
+            })
+        }
+        response = requests.post(url, headers=headers, files=files, data=data)
+    if response.status_code == 200:
+        ipfs_hash = response.json()['IpfsHash']
+        return ipfs_hash
+    else:
+        raise Exception(f"Échec de l'upload sur Pinata : {response.text}")
+
+# Fonction pour télécharger un fichier depuis Pinata
+def download_from_pinata(ipfs_hash, save_path):
+    url = f"https://gateway.pinata.cloud/ipfs/{ipfs_hash}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open(save_path, 'wb') as f:
+            f.write(response.content)
+        return True
+    else:
+        raise Exception(f"Échec du téléchargement depuis IPFS : {response.text}")
+
+# Fonction de chiffrement
+def encrypt_file(file_path, key):
+    cipher = AES.new(key.encode('utf-8'), AES.MODE_EAX)
+    with open(file_path, 'rb') as f:
+        data = f.read()
+    ciphertext, tag = cipher.encrypt_and_digest(data)
+    encrypted_data = cipher.nonce + tag + ciphertext
+    encrypted_file_path = file_path + ".enc"
+    with open(encrypted_file_path, 'wb') as f:
+        f.write(encrypted_data)
+    return encrypted_file_path
+
+
+# Fonction de déchiffrement
+def decrypt_file(encrypted_file_path, key, decrypted_file_path):
+    with open(encrypted_file_path, 'rb') as f:
+        nonce = f.read(16)
+        tag = f.read(16)
+        ciphertext = f.read()
+    cipher = AES.new(key.encode('utf-8'), AES.MODE_EAX, nonce=nonce)
+    data = cipher.decrypt_and_verify(ciphertext, tag)
+    with open(decrypted_file_path, 'wb') as f:
+        f.write(data)
+
+class MedicalApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Medical Record Blockchain System")
+        self.root.geometry("700x600")
+        self.root.configure(bg="#f5f5f5")
+
+        # Créer un notebook (interface à onglets)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(expand=True, fill="both", padx=10, pady=10)
+
+        # Créer les onglets
+        self.register_tab = ttk.Frame(self.notebook)
+        self.permission_tab = ttk.Frame(self.notebook)
+        self.info_tab = ttk.Frame(self.notebook)
+        self.audit_tab = ttk.Frame(self.notebook)      # Nouvel onglet Audit
+        self.doctor_tab = ttk.Frame(self.notebook)     # Nouvel onglet Docteur
+
+        self.notebook.add(self.register_tab, text="Register Patient")
+        self.notebook.add(self.permission_tab, text="Grant Permission")
+        self.notebook.add(self.info_tab, text="Patient Info")
+        self.notebook.add(self.audit_tab, text="Audit Logs")        # Ajouter l'onglet Audit
+        self.notebook.add(self.doctor_tab, text="Doctor Dashboard")  # Ajouter l'onglet Docteur
+
+        # Ajouter le contenu aux onglets
+        self.create_register_tab()
+        self.create_permission_tab()
+        self.create_info_tab()
+        self.create_audit_tab()
+        self.create_doctor_tab()
+
+        # Barre de statut
+        self.status_var = tk.StringVar()
+        self.status_bar = tk.Label(self.root, textvariable=self.status_var, bg="#e0e0e0", relief="sunken", anchor="w")
+        self.status_bar.pack(side="bottom", fill="x")
+
+    def set_status(self, message, success=True):
+        self.status_var.set(message)
+        self.status_bar.configure(fg="green" if success else "red")
+
+    def create_register_tab(self):
+        ttk.Label(self.register_tab, text="Register Patient", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=10
+        )
+
+        ttk.Label(self.register_tab, text="Patient Name:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.entry_name = ttk.Entry(self.register_tab, width=40)
+        self.entry_name.grid(row=1, column=1, pady=5, padx=5)
+
+        ttk.Label(self.register_tab, text="Patient Age:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        self.entry_age = ttk.Entry(self.register_tab, width=40)
+        self.entry_age.grid(row=2, column=1, pady=5, padx=5)
+
+        ttk.Label(self.register_tab, text="Medical Record File:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
+        self.file_path_var = tk.StringVar()
+        ttk.Entry(self.register_tab, textvariable=self.file_path_var, width=40, state="readonly").grid(row=3, column=1, pady=5, padx=5)
+        ttk.Button(self.register_tab, text="Choose File", command=self.select_file).grid(row=4, column=1, sticky="w", padx=5)
+
+        ttk.Button(self.register_tab, text="Upload and Register", command=self.register_patient).grid(
+            row=5, column=0, columnspan=3, pady=15
+        )
+
+    def create_permission_tab(self):
+        ttk.Label(self.permission_tab, text="Grant Permission", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=10
+        )
+
+        ttk.Label(self.permission_tab, text="Doctor Ethereum Address:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.entry_doctor_address = ttk.Entry(self.permission_tab, width=40)
+        self.entry_doctor_address.grid(row=1, column=1, pady=5, padx=5)
+
+        ttk.Button(self.permission_tab, text="Grant Permission", command=self.grant_permission).grid(
+            row=2, column=0, columnspan=3, pady=15
+        )
+
+    def create_info_tab(self):
+        ttk.Label(self.info_tab, text="Patient Information", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=10
+        )
+
+        ttk.Button(self.info_tab, text="Get Patient Info", command=self.get_patient_info).grid(
+            row=1, column=0, columnspan=3, pady=10
+        )
+
+        self.info_display = tk.Text(self.info_tab, height=10, width=60, state="disabled", wrap="word")
+        self.info_display.grid(row=2, column=0, columnspan=3, padx=10, pady=5)
+
+        ttk.Button(self.info_tab, text="Download Medical Record", command=self.download_medical_record).grid(
+            row=3, column=0, columnspan=3, pady=10
+        )
+
+    def create_audit_tab(self):
+        ttk.Label(self.audit_tab, text="Audit Logs", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=10
+        )
+
+        # Treeview pour afficher les logs d'audit
+        columns = ("User", "Action", "Timestamp", "Patient")
+        self.audit_tree = ttk.Treeview(self.audit_tab, columns=columns, show='headings')
+        for col in columns:
+            self.audit_tree.heading(col, text=col)
+            self.audit_tree.column(col, width=150, anchor='center')
+        self.audit_tree.grid(row=1, column=0, columnspan=3, padx=10, pady=10)
+
+        ttk.Button(self.audit_tab, text="Refresh Logs", command=self.refresh_audit_logs).grid(
+            row=2, column=0, columnspan=3, pady=10
+        )
+
+    def create_doctor_tab(self):
+        ttk.Label(self.doctor_tab, text="Doctor Dashboard", font=("Arial", 14, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=10
+        )
+
+        ttk.Label(self.doctor_tab, text="Patient Ethereum Address:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.entry_patient_address = ttk.Entry(self.doctor_tab, width=40)
+        self.entry_patient_address.grid(row=1, column=1, pady=5, padx=5)
+
+        ttk.Button(self.doctor_tab, text="View Patient Info", command=self.view_patient_info).grid(
+            row=2, column=0, columnspan=3, pady=10
+        )
+
+        self.doctor_info_display = tk.Text(self.doctor_tab, height=10, width=60, state="disabled", wrap="word")
+        self.doctor_info_display.grid(row=3, column=0, columnspan=3, padx=10, pady=5)
+
+    def select_file(self):
+        file_path = filedialog.askopenfilename(title="Select Medical Record", filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
+        if file_path:
+            self.file_path_var.set(file_path)
+
+    def register_patient(self):
+        name = self.entry_name.get().strip()
+        age = self.entry_age.get().strip()
+        file_path = self.file_path_var.get().strip()
+
+        if not name or not age or not file_path:
+            self.set_status("All fields are required for registration!", success=False)
+            return
+
+        try:
+            age = int(age)
+            if age <= 0:
+                raise ValueError("Age must be greater than zero.")
+        except ValueError as ve:
+            self.set_status(str(ve), success=False)
+            return
+
+        try:
+            # Encrypt the file before uploading
+            encryption_key = os.getenv('ENCRYPTION_KEY')
+            if not encryption_key or len(encryption_key) != 16:
+                raise Exception("Invalid encryption key. It must be 16 characters long.")
+            encrypted_file_path = encrypt_file(file_path, encryption_key)
+        except Exception as e:
+            self.set_status(f"Encryption Error: {str(e)}", success=False)
+            return
+
+        try:
+            # Upload encrypted file to Pinata
+            ipfs_hash = upload_to_pinata(encrypted_file_path)
+            os.remove(encrypted_file_path)  # Remove encrypted file after upload
+            self.set_status(f"File uploaded to IPFS. Hash: {ipfs_hash}", success=True)
+        except Exception as e:
+            self.set_status(f"Pinata Upload Error: {str(e)}", success=False)
+            return
+
+        try:
+            # Appeler le smart contract pour stocker les données du patient
+            tx_hash = ContractPatient.functions.addOrUpdatePatient(name, age, ipfs_hash).transact()
+            web3.eth.wait_for_transaction_receipt(tx_hash)
+            self.set_status(f"Patient {name} registered successfully!", success=True)
+            self.log_audit(web3.eth.default_account, "Register Patient", web3.eth.default_account)
+        except Exception as e:
+            self.set_status(f"Blockchain Error: {str(e)}", success=False)
+
+    def grant_permission(self):
+        doctor_address = self.entry_doctor_address.get().strip()
+        if not doctor_address:
+            self.set_status("Doctor's address is required!", success=False)
+            return
+
+        # Validation de l'adresse Ethereum
+        if not web3.is_address(doctor_address):
+            self.set_status("Invalid Ethereum address.", success=False)
+            return
+
+        try:
+            # Accorder la permission via le smart contract
+            tx_hash = ContractDoctor.functions.grantPermission(doctor_address).transact()
+            web3.eth.wait_for_transaction_receipt(tx_hash)
+            self.set_status("Permission granted successfully!", success=True)
+            self.log_audit(web3.eth.default_account, "Grant Permission", web3.eth.default_account)
+        except Exception as e:
+            self.set_status(f"Blockchain Error: {str(e)}", success=False)
+
+    def get_patient_info(self):
+        try:
+            name, age, record_hash = ContractPatient.functions.getPatient(web3.eth.default_account).call()
+            info_text = f"Name: {name}\nAge: {age}\nRecord Hash: {record_hash}"
+            self.info_display.configure(state="normal")
+            self.info_display.delete(1.0, "end")
+            self.info_display.insert("end", info_text)
+            self.info_display.configure(state="disabled")
+            self.set_status("Patient information retrieved successfully!", success=True)
+        except Exception as e:
+            self.set_status(f"Blockchain Error: {str(e)}", success=False)
+
+    def download_medical_record(self):
+        try:
+            # Récupérer le hash IPFS du patient actuel
+            _, _, record_hash = ContractPatient.functions.getPatient(web3.eth.default_account).call()
+            if not record_hash:
+                self.set_status("No medical record found.", success=False)
+                return
+
+            # Demander à l'utilisateur de choisir l'emplacement de sauvegarde
+            save_path = filedialog.asksaveasfilename(title="Save Medical Record", defaultextension=".pdf",
+                                                     filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
+            if not save_path:
+                self.set_status("Save operation cancelled.", success=False)
+                return
+
+            # Télécharger le fichier chiffré depuis Pinata
+            try:
+                download_from_pinata(record_hash, save_path + ".enc")
+                self.set_status("File downloaded from IPFS.", success=True)
+            except Exception as e:
+                self.set_status(f"Pinata Download Error: {str(e)}", success=False)
+                return
+
+            # Déchiffrer le fichier
+            try:
+                encryption_key = os.getenv('ENCRYPTION_KEY')
+                if not encryption_key or len(encryption_key) != 16:
+                    raise Exception("Invalid encryption key.")
+                decrypt_file(save_path + ".enc", encryption_key, save_path)
+                os.remove(save_path + ".enc")  # Supprimer le fichier chiffré après déchiffrement
+                self.set_status(f"Medical record downloaded and decrypted to {save_path}", success=True)
+                messagebox.showinfo("Success", f"Medical record downloaded and decrypted to {save_path}")
+            except Exception as e:
+                self.set_status(f"Decryption Error: {str(e)}", success=False)
+                return
+
+        except Exception as e:
+            self.set_status(f"Error: {str(e)}", success=False)
+
+    def view_patient_info(self):
+        patient_address = self.entry_patient_address.get().strip()
+        if not patient_address:
+            self.set_status("Patient address is required!", success=False)
+            return
+
+        if not web3.is_address(patient_address):
+            self.set_status("Invalid Ethereum address.", success=False)
+            return
+
+        try:
+            name, age, record_hash = ContractPatient.functions.getPatient(patient_address).call()
+            info_text = f"Name: {name}\nAge: {age}\nRecord Hash: {record_hash}"
+            self.doctor_info_display.configure(state="normal")
+            self.doctor_info_display.delete(1.0, "end")
+            self.doctor_info_display.insert("end", info_text)
+            self.doctor_info_display.configure(state="disabled")
+            self.set_status("Patient information retrieved successfully!", success=True)
+        except Exception as e:
+            self.set_status(f"Blockchain Error: {str(e)}", success=False)
+
+    def refresh_audit_logs(self):
+        try:
+            # Récupérer le nombre total d'actions depuis ContractAudit
+            action_count = ContractAudit.functions.getActionCount().call()
+            self.audit_tree.delete(*self.audit_tree.get_children())
+
+            for index in range(action_count):
+                user, action_type, timestamp, patient = ContractAudit.functions.getAction(index).call()
+                formatted_time = self.format_timestamp(timestamp)
+                self.audit_tree.insert("", "end", values=(user, action_type, formatted_time, patient))
+            self.set_status("Audit logs refreshed successfully!", success=True)
+        except Exception as e:
+            self.set_status(f"Audit Log Error: {str(e)}", success=False)
+
+    def format_timestamp(self, timestamp):
+        import datetime
+        return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+    def log_audit(self, user, action, patient):
+        try:
+            # Enregistrer l'action dans le smart contract ContractAudit
+            tx_hash = ContractAudit.functions.logAction(user, action, patient).transact()
+            web3.eth.wait_for_transaction_receipt(tx_hash)
+        except Exception as e:
+            self.set_status(f"Audit Logging Error: {str(e)}", success=False)
+
+# Connecter au réseau Ethereum (Ganache)
+ganache_url = "http://127.0.0.1:7545"  # Remplacez par l'URL de votre nœud Ethereum
+web3 = Web3(Web3.HTTPProvider(ganache_url))
+
+# Vérifier la connexion
+if not web3.is_connected():
+    print("Failed to connect to Ganache!")
+    exit()
+
+# Définir le compte par défaut (premier compte dans Ganache)
+web3.eth.default_account = web3.eth.accounts[0]
+
+# Charger l'ABI et l'adresse du smart contract compilé
+with open("compiled_contracts.json", "r") as file:
+    compiled_contracts = json.load(file)
+
+# Contract Patient
+contract_patient_address = "0x0A89476B64B51553d2cf06e70dd5a45b0C136CC0"  # Remplacez par l'adresse déployée réelle
+patient_abi = compiled_contracts["contracts"]["ContractPatient.sol"]["ContractPatient"]["abi"]
+ContractPatient = web3.eth.contract(address=contract_patient_address, abi=patient_abi)
+
+# Contract Doctor
+contract_doctor_address = "0x75e50d02782C351Ad9B76401F8039981F4F1A13A"  # Remplacez par l'adresse déployée réelle
+doctor_abi = compiled_contracts["contracts"]["ContractDoctor.sol"]["ContractDoctor"]["abi"]
+ContractDoctor = web3.eth.contract(address=contract_doctor_address, abi=doctor_abi)
+
+# Contract Audit
+contract_audit_address = "0x8cc9561cC8da377A739f0a6185A3BF3F7A826ca6"  # Remplacez par l'adresse déployée réelle
+audit_abi = compiled_contracts["contracts"]["ContractAudit.sol"]["ContractAudit"]["abi"]
+ContractAudit = web3.eth.contract(address=contract_audit_address, abi=audit_abi)
+
+# Initialiser la fenêtre Tkinter
+root = tk.Tk()
+app = MedicalApp(root)
+root.mainloop()   
